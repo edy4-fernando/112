@@ -44,7 +44,8 @@
         .hero .frase { max-width: 340px; margin: 0; font-size: 27px; text-align: center; transform: rotate(-5deg); }
 
         .historia { display: grid; grid-template-columns: 0.8fr 1.3fr 1fr; align-items: center; gap: 30px; padding-top: 54px; padding-bottom: 54px; }
-        .foto-redonda { width: min(250px, 100%); aspect-ratio: 1; margin: auto; border: 8px solid #b8d58f; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #d7e6bd, #8aa86a 70%); }
+        .foto-redonda { width: min(250px, 100%); aspect-ratio: 1; margin: auto; overflow: hidden; border: 8px solid #b8d58f; border-radius: 50%; box-shadow: 0 12px 30px rgb(42 77 36 / 16%); }
+        .foto-redonda img { width: 100%; height: 100%; object-fit: cover; }
         .historia h2, .naturaleza h2, .recomendaciones h2 { margin: 0 0 10px; font-size: clamp(30px, 5vw, 40px); }
         .historia p { margin: 0 0 12px; font-size: 14px; }
         .tarjeta { margin-bottom: 14px; padding: 17px 19px; border-radius: 14px; background: var(--verde-claro); font-size: 13px; }
@@ -67,6 +68,15 @@
         .seccion-productos { padding: 28px 0 10px; scroll-margin-top: 80px; }
         .seccion-productos > .contenedor > h2 { margin: 0 0 6px; color: var(--verde); font-size: 32px; }
         .seccion-productos > .contenedor > p { margin: 0 0 18px; color: #666; }
+        .lista-precios { margin: 22px auto 28px; padding: 22px; border: 1px solid #e1e9d9; border-radius: 16px; background: #fff; box-shadow: 0 8px 22px rgb(36 65 37 / 6%); }
+        .lista-precios-cabecera { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+        .lista-precios h3 { margin: 0; color: var(--verde); font-size: 19px; }
+        .lista-precios-cabecera p { margin: 4px 0 0; color: #657064; font-size: 13px; }
+        .precios-tramos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+        .precio-tramo { padding: 13px; border-radius: 11px; background: #f4f8f0; font-size: 12px; }
+        .precio-tramo strong { display: block; margin-bottom: 5px; color: #2e6b2f; font-size: 14px; }
+        .boton-precios { flex: 0 0 auto; }
+        @media (max-width: 620px) { .precios-tramos { grid-template-columns: 1fr; } }
 
         .recomendaciones { padding: 44px 0 50px; border-top: 1px solid #ece9dc; text-align: center; }
         .recomendaciones h2 { margin-bottom: 24px; }
@@ -140,7 +150,7 @@
         </section>
 
         <section class="contenedor historia" id="nosotros">
-            <div class="foto-redonda" role="img" aria-label="Ilustración de hojas naturales"></div>
+            <div class="foto-redonda"><img src="{{ asset('images/naturaleza/jengibre.jpg') }}" alt="Raíz de jengibre, una de las plantas que inspiran nuestra historia" loading="lazy"></div>
             <div>
                 <h2 class="script">Nuestra historia</h2>
                 <p>Bio Natural Carmelita nació del sueño de una mujer apasionada por la naturaleza y el bienestar. Con la convicción de que la mejor salud comienza en lo natural, la Sra. Carmelita decidió compartir los beneficios de las plantas medicinales y los superalimentos, creando productos de alta calidad.</p>
@@ -184,6 +194,20 @@
             <div class="contenedor">
                 <h2>Nuestros productos</h2>
                 <p>Explora cápsulas, bebidas y harinas. Puedes buscar por nombre o categoría de salud.</p>
+                <div class="lista-precios" aria-labelledby="titulo-lista-precios">
+                    <div class="lista-precios-cabecera">
+                        <div>
+                            <h3 id="titulo-lista-precios">Lista de precios Carmelitas</h3>
+                            <p>Precios públicos y descuentos por volumen del tarifario.</p>
+                        </div>
+                        <a class="boton boton-precios" href="{{ asset('documentos/precios.pdf') }}" download="Precios-Bio-Natural-Carmelita.pdf">Descargar lista PDF</a>
+                    </div>
+                    <div class="precios-tramos">
+                        <div class="precio-tramo"><strong>Compras desde S/ 500</strong>Bebidas y cápsulas: 40% · Otros productos: 30%</div>
+                        <div class="precio-tramo"><strong>Compras desde S/ 1,500</strong>Bebidas y cápsulas: 60% · Otros productos: 50%</div>
+                        <div class="precio-tramo"><strong>Compras desde S/ 4,000</strong>Bebidas y cápsulas: 70% · Otros productos: 60%</div>
+                    </div>
+                </div>
             </div>
             <livewire:catalog-manager />
         </section>

@@ -10,6 +10,7 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             CatalogItemSeeder::class,
+            PdfPriceListSeeder::class,
             CatalogItemImageSeeder::class,
             CatalogTraceabilitySeeder::class,
             DemoCustomerHistorySeeder::class,

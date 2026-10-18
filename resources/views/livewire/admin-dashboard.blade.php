@@ -40,6 +40,7 @@ new class extends Component
     public $pos_cart = []; // ['product_id' => ['name', 'price', 'qty']]
     public $pos_selected_product_id = '';
     public $pos_payment_method = 'Efectivo'; // Efectivo, Yape/Plin, Tarjeta
+    public $pendingOrderPaymentMethods = [];
 
     // Métodos CRUD Productos
     public function openModal()
@@ -307,6 +308,81 @@ new class extends Component
         $this->closePosModal();
     }
 
+    public function completePendingOrder(int $orderId): void
+    {
+        $validated = $this->validate([
+            "pendingOrderPaymentMethods.{$orderId}" => 'required|in:Efectivo,Yape / Plin,Tarjeta (POS)',
+        ]);
+        $paymentMethod = $validated['pendingOrderPaymentMethods'][$orderId];
+
+        DB::transaction(function () use ($orderId, $paymentMethod): void {
+            $order = PatientOrder::query()->whereKey($orderId)->lockForUpdate()->firstOrFail();
+
+            if ($order->status !== 'Pendiente') {
+                throw ValidationException::withMessages([
+                    'pendingOrder' => 'Este pedido ya fue procesado.',
+                ]);
+            }
+
+            $items = $order->items()->get();
+
+            if ($items->isEmpty()) {
+                throw ValidationException::withMessages([
+                    'pendingOrder' => "El pedido #{$order->id} no tiene productos registrados.",
+                ]);
+            }
+
+            $products = [];
+
+            foreach ($items as $item) {
+                $product = CatalogItem::query()->whereKey($item->catalog_item_id)->lockForUpdate()->first();
+
+                if (! $product || $product->stock < $item->quantity || $product->expires_at?->isBefore(today())) {
+                    throw ValidationException::withMessages([
+                        'pendingOrder' => "No se puede completar el pedido #{$order->id}: revisa stock y caducidad de sus productos.",
+                    ]);
+                }
+
+                $products[] = [$product, $item->quantity];
+            }
+
+            foreach ($products as [$product, $quantity]) {
+                $product->decrement('stock', $quantity);
+            }
+
+            $order->update([
+                'status' => 'Completado',
+                'payment_method' => $paymentMethod,
+            ]);
+        });
+
+        unset($this->pendingOrderPaymentMethods[$orderId]);
+        session()->flash('message', "Pedido #{$orderId} confirmado; se descontó el stock.");
+    }
+
+    public function cancelPendingOrder(int $orderId): void
+    {
+        $cancelled = DB::transaction(function () use ($orderId): bool {
+            $order = PatientOrder::query()->whereKey($orderId)->lockForUpdate()->firstOrFail();
+
+            if ($order->status !== 'Pendiente') {
+                return false;
+            }
+
+            $order->update(['status' => 'Cancelado']);
+
+            return true;
+        });
+
+        if (! $cancelled) {
+            session()->flash('message', 'Solo se pueden cancelar pedidos pendientes.');
+
+            return;
+        }
+
+        session()->flash('message', "Pedido #{$orderId} cancelado.");
+    }
+
     public function with()
     {
         // 1. Métricas generales
@@ -345,6 +421,12 @@ new class extends Component
         $recentOrders = class_exists(PatientOrder::class)
             ? PatientOrder::with(['customer', 'items'])->latest()->take(5)->get()
             : collect([]);
+
+        $pendingOrders = PatientOrder::with(['customer', 'items'])
+            ->where('status', 'Pendiente')
+            ->whereHas('customer', fn ($query) => $query->where('is_demo', false))
+            ->oldest()
+            ->get();
 
         $customerHistories = Customer::withCount('orders')
             ->withSum('orders', 'total_amount')
@@ -394,6 +476,7 @@ new class extends Component
             'lowStockRawMaterials' => $lowStockRawMaterials,
             'activePatients' => $activePatients,
             'recentOrders' => $recentOrders,
+            'pendingOrders' => $pendingOrders,
             'customerHistories' => $customerHistories,
             'topProducts' => $topProducts,
             'crudProducts' => $crudProducts,
@@ -443,6 +526,9 @@ new class extends Component
             </div>
             
             <div style="display: flex; gap: 10px;">
+                <a href="{{ route('admin.users.create') }}" style="background: #fff; color: #2e6b2f; border: 1px solid #b6cbb4; padding: 10px 14px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px;">
+                    👤 Nuevo administrador
+                </a>
                 <!-- BOTÓN NUEVA VENTA EN LOCAL -->
                 <button wire:click="openPosModal" style="background: #e65100; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold; font-size: 13px; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.15);">
                     🛍️ Nueva Venta en Local (POS)
@@ -465,6 +551,11 @@ new class extends Component
             <div style="background: white; padding: 18px; border-radius: 8px; border-left: 5px solid #2e7d32; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
                 <div style="font-size: 12px; color: #777; font-weight: bold;">VENTAS DEL MES</div>
                 <div style="font-size: 22px; font-weight: bold; color: #2e7d32; margin-top: 5px;">S/ {{ number_format($totalSalesMonth, 2) }}</div>
+            </div>
+
+            <div style="background: white; padding: 18px; border-radius: 8px; border-left: 5px solid #e65100; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                <div style="font-size: 12px; color: #777; font-weight: bold;">PEDIDOS POR CONFIRMAR</div>
+                <div style="font-size: 22px; font-weight: bold; color: #e65100; margin-top: 5px;">{{ $pendingOrders->count() }} Pedidos</div>
             </div>
 
             <div style="background: white; padding: 18px; border-radius: 8px; border-left: 5px solid #0288d1; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
@@ -498,6 +589,52 @@ new class extends Component
                 </ul>
             </div>
         @endif
+
+        <section class="dashboard-panel" id="pedidos-pendientes" style="background: white; padding: 20px; margin-bottom: 25px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; border-bottom: 2px solid #fff0e6; padding-bottom: 12px; margin-bottom: 14px;">
+                <div>
+                    <h2 style="font-size: 17px; color: #9a3d00; margin: 0;">🧾 Pedidos por confirmar</h2>
+                    <p style="font-size: 12px; color: #777; margin: 5px 0 0;">Revisa cada pedido y confirma el pago antes de descontar el stock.</p>
+                </div>
+                <span style="background: #fff0e6; color: #9a3d00; padding: 5px 10px; border-radius: 20px; font-size: 12px; font-weight: bold;">{{ $pendingOrders->count() }} pendientes</span>
+            </div>
+
+            @error('pendingOrder')
+                <div role="alert" style="background: #ffebee; color: #b71c1c; padding: 10px 12px; border-radius: 7px; margin-bottom: 12px;">{{ $message }}</div>
+            @enderror
+
+            @forelse($pendingOrders as $pendingOrder)
+                <article wire:key="pending-order-{{ $pendingOrder->id }}" style="border: 1px solid #eee4dc; border-radius: 10px; padding: 14px; margin-bottom: 10px;">
+                    <div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                        <div>
+                            <strong>Pedido #{{ $pendingOrder->id }} · {{ $pendingOrder->customer->name ?? 'Cliente' }}</strong>
+                            <div style="font-size: 11px; color: #777; margin-top: 3px;">{{ $pendingOrder->customer->phone ?? '' }} · {{ $pendingOrder->created_at->format('d/m/Y H:i') }} · {{ $pendingOrder->channel }}</div>
+                        </div>
+                        <strong style="color: #1b5e20;">S/ {{ number_format($pendingOrder->total_amount, 2) }}</strong>
+                    </div>
+                    <ul style="margin: 10px 0; padding-left: 20px; color: #555; font-size: 12px;">
+                        @foreach($pendingOrder->items as $item)
+                            <li>{{ $item->product_name }} × {{ $item->quantity }} · S/ {{ number_format($item->unit_price, 2) }} c/u</li>
+                        @endforeach
+                    </ul>
+                    <div style="display: flex; align-items: end; gap: 8px; flex-wrap: wrap;">
+                        <label style="font-size: 11px; color: #555;">Pago verificado
+                            <select wire:model="pendingOrderPaymentMethods.{{ $pendingOrder->id }}" style="display: block; margin-top: 4px; padding: 8px; border: 1px solid #ccc; border-radius: 6px;">
+                                <option value="">Selecciona método</option>
+                                <option value="Efectivo">Efectivo</option>
+                                <option value="Yape / Plin">Yape / Plin</option>
+                                <option value="Tarjeta (POS)">Tarjeta</option>
+                            </select>
+                        </label>
+                        <button wire:click="completePendingOrder({{ $pendingOrder->id }})" wire:loading.attr="disabled" style="background: #2e7d32; color: white; border: 0; border-radius: 6px; padding: 9px 12px; font-weight: bold; cursor: pointer;">Confirmar y descontar stock</button>
+                        <button wire:confirm="¿Cancelar este pedido pendiente? No se descontó inventario." wire:click="cancelPendingOrder({{ $pendingOrder->id }})" style="background: #fff; color: #b71c1c; border: 1px solid #ef9a9a; border-radius: 6px; padding: 9px 12px; cursor: pointer;">Cancelar pedido</button>
+                    </div>
+                    @error("pendingOrderPaymentMethods.{$pendingOrder->id}") <small style="display: block; color: #b71c1c; margin-top: 5px;">Selecciona el método de pago verificado.</small> @enderror
+                </article>
+            @empty
+                <div style="text-align: center; padding: 18px; color: #777; background: #f8faf7; border-radius: 8px;">No hay pedidos pendientes de confirmación.</div>
+            @endforelse
+        </section>
 
         <!-- SECCIÓN DE GRÁFICOS Y ANALÍTICA DE VENTAS -->
         <div class="dashboard-panel" style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 25px;">
